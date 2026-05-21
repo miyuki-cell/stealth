@@ -19,7 +19,6 @@ class Entity(pygame.sprite.Sprite):
         self.sprite = self.image 
 
     def move(self, dx: float, dy: float, game_map=None):
-        """Menggerakkan entitas dengan validasi collision sederhana jika ada map."""
         new_x = self.x + dx * self.speed
         new_y = self.y + dy * self.speed
 
@@ -37,16 +36,13 @@ class Entity(pygame.sprite.Sprite):
         self.rect.y = int(self.y)
 
     def update(self):
-        """Method overridable untuk update logika entitas di setiap frame."""
         self.rect.x = int(self.x)
         self.rect.y = int(self.y)
 
     def draw(self, screen: pygame.Surface):
-        """Menggambar entitas ke layar."""
         screen.blit(self.image, self.rect)
 
     def check_collision(self, other_rect: pygame.Rect) -> bool:
-        """Mengecek tabrakan dengan rect lain."""
         return self.rect.colliderect(other_rect)
 
 
@@ -56,17 +52,14 @@ class EnemyState(ABC):
 
     @abstractmethod
     def enter(self, enemy):
-        """Dijalankan sekali saat enemy memasuki state ini."""
         pass
 
     @abstractmethod
     def execute(self, enemy, player):
-        """Dijalankan setiap frame (game loop) untuk memperbarui logika state."""
         pass
 
     @abstractmethod
     def exit(self, enemy):
-        """Dijalankan sekali saat enemy keluar dari state ini."""
         pass
 
 
@@ -109,7 +102,6 @@ class PatrolState(EnemyState):
             enemy.move(direction_x, direction_y)
 
     def move_to_next_point(self, enemy):
-        """Beralih ke indeks rute patroli berikutnya."""
         if enemy.patrol_points:
             self.current_point_index = (self.current_point_index + 1) % len(enemy.patrol_points)
 
@@ -183,7 +175,6 @@ class SearchState(EnemyState):
         self.search_area(enemy)
 
     def generate_random_sub_target(self, enemy):
-        """Membuat titik acak di sekitar lokasi terakhir player terlihat."""
         radius = 80
         random_angle = random.uniform(0, 2 * math.pi)
         random_radius = random.uniform(20, radius)
