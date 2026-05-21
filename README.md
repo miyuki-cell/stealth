@@ -49,7 +49,7 @@ Pastikan Anda sudah menginstal **Python (versi 3.8 atau yang lebih baru)** di ko
 ### Langkah-Langkah Instalasi
 
 1.  **Clone Repositori Ini**
-    `git clone https://github.com/miyuki-cell/stealth.git`
+    `gh repo clone miyuki-cell/stealth`
     `cd stealth`
 
 2. **Buat & aktifkan Virtual environments (Direkomendasikan)**
