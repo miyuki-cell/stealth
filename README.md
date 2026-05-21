@@ -12,7 +12,7 @@ Sebuah proyek game aksi penyusupan dari sudut pandang atas (*top-down*) yang mem
 
 ---
 
-# 🎯 Fitur Utama
+# Fitur Utama
 
 1. **Procedural Map Generation:** Tata letak ruangan, dinding, rintangan, dan koridor digenerasikan secara acak setiap kali permainan baru dimulai, memberikan tantangan yang unik di setiap *run*.
 2. **Dynamic AI State Machine:** Musuh memiliki kecerdasan buatan dinamis yang merespons aksi pemain (melihat atau mendengar langkah kaki) dengan transisi perilaku yang halus.
@@ -41,7 +41,7 @@ Semua objek bergerak di dalam game diturunkan dari satu *superclass* utama, yait
 
 ---
 
-## 🚀 Cara Menjalankan Project
+## Cara Menjalankan Project
 
 ### Prasyarat
 Pastikan Anda sudah menginstal **Python (versi 3.8 atau yang lebih baru)** di komputer Anda.
