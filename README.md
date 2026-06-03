@@ -72,10 +72,12 @@ Pastikan Anda sudah menginstal **Python (versi 3.8 atau yang lebih baru)** di ko
      source venv/bin/activate
 
 4. **Jalankan Game**
+   ``bash
    `python stealthgame.py`
 
    atau
 
-   `python2 stealthgame.py`
+   ```bash
+   python2 stealthgame.py
 
    
