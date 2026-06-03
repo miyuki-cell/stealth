@@ -24,6 +24,7 @@ C_AMBER       = (220, 140, 20)
 C_CYAN        = (40, 220, 180)
 C_WHITE       = (220, 210, 190)
 C_SHADOW      = (0, 0, 0, 120)
+C_GOLD        = (255, 215, 0)
 
 SKIN_PRESETS = [
     {"name": "Default",    "skin": (200, 160, 110), "suit": (10, 70, 10),   "outline": (25, 25, 25)},
@@ -200,7 +201,8 @@ class SoundManager:
     def __init__(self):
         self.lobby_music = None
         self.gameover_sound = None
-        self.blip_sound = None          # <-- NEW
+        self.win_sound = None
+        self.blip_sound = None
         self.music_playing = False
         self._load()
 
@@ -208,7 +210,8 @@ class SoundManager:
         base = os.path.dirname(os.path.abspath(__file__))
         lobby_path = os.path.join(base, "assets", "lobby.mp3")
         go_path    = os.path.join(base, "assets", "gameover.mp3")
-        blip_path  = os.path.join(base, "assets", "Blip.wav")   # <-- NEW
+        win_path   = os.path.join(base, "assets", "win.mp3")
+        blip_path  = os.path.join(base, "assets", "Blip.wav")
 
         if os.path.exists(go_path):
             try:
@@ -217,7 +220,6 @@ class SoundManager:
             except Exception:
                 pass
 
-        # Load blip sound effect
         if os.path.exists(blip_path):
             try:
                 self.blip_sound = pygame.mixer.Sound(blip_path)
@@ -225,11 +227,17 @@ class SoundManager:
             except Exception:
                 pass
 
+        if os.path.exists(win_path):
+            try:
+                self.win_sound = pygame.mixer.Sound(win_path)
+                self.win_sound.set_volume(0.6)
+            except Exception:
+                pass
+
         self._lobby_path = lobby_path if os.path.exists(lobby_path) else None
         self._go_path    = go_path    if os.path.exists(go_path)    else None
 
     def play_blip(self):
-        """Play the UI navigation blip (skin selection, menus)."""
         if self.blip_sound:
             try:
                 self.blip_sound.play()
@@ -259,12 +267,50 @@ class SoundManager:
             except Exception:
                 pass
 
+    def stop_gameover(self):
+        if self.gameover_sound:
+            try:
+                self.gameover_sound.stop()
+            except Exception:
+                pass
+
+    def play_win(self):
+        if self.win_sound:
+            try:
+                self.win_sound.play()
+            except Exception:
+                pass
+
+    def stop_win(self):
+        if self.win_sound:
+            try:
+                self.win_sound.stop()
+            except Exception:
+                pass
+
     def fade_out(self, ms=800):
         try:
             pygame.mixer.music.fadeout(ms)
             self.music_playing = False
         except Exception:
             pass
+
+class VisionSystem:
+    def __init__(self, max_distance: int = 160):
+        self.max_distance: int = max_distance
+
+    def can_see_player(self, enemy, player) -> bool:
+        if self.calculate_distance(enemy, player) > self.max_distance:
+            return False
+        return self.check_line_of_sight(enemy, player)
+
+    def calculate_distance(self, enemy, player) -> float:
+        return math.hypot(player.x - enemy.x, player.y - enemy.y)
+
+    def check_line_of_sight(self, enemy, player) -> bool:
+        if player.is_hidden:
+            return self.calculate_distance(enemy, player) < self.max_distance * 0.25
+        return True
 
 class Entity(pygame.sprite.Sprite):
     def __init__(self, x, y, w, h, speed):
@@ -287,6 +333,12 @@ class Entity(pygame.sprite.Sprite):
 
     def update(self):
         self.rect.x = int(self.x); self.rect.y = int(self.y)
+
+    def draw(self, screen: pygame.Surface):
+        screen.blit(self.image, self.rect)
+
+    def check_collision(self, other: "Entity") -> bool:
+        return self.rect.colliderect(other.rect)
 
 class EnemyState(ABC):
     def __init__(self, name): self.state_name = name
@@ -386,7 +438,10 @@ class Player(Entity):
     def __init__(self, x, y, skin_preset=None):
         super().__init__(x, y, 32, 32, 5)
         self.health = 100
+        self.inventory = []
         self.is_hidden = False
+        self.noise_level = 0
+        self.hack_skill = 1
         self.visibility_level = 100
         self.skin_preset = skin_preset if skin_preset else SKIN_PRESETS[0]
         self.image = make_player_surf(self.skin_preset)
@@ -409,6 +464,15 @@ class Player(Entity):
             "life": 40,
         })
 
+    def hide(self):
+        self.is_hidden = True
+        self.noise_level = 0
+        self.visibility_level = 0
+
+    def interact(self, obj):
+        if hasattr(obj, 'on_interact'):
+            obj.on_interact(self)
+
     def draw(self, screen):
         shadow = pygame.Surface((28, 10), pygame.SRCALPHA)
         pygame.draw.ellipse(shadow, (0, 0, 0, 60), shadow.get_rect())
@@ -429,9 +493,13 @@ class Enemy(Entity):
     def __init__(self, x, y, speed=2):
         super().__init__(x, y, 32, 32, speed)
         self.image = make_enemy_surf(PATROL_PAL)
+        self.health = 100
+        self.vision_range = 160
+        self.vision_angle = 60
         self.alert_level = 0
         self.patrol_points = []
         self.current_state: Optional[EnemyState] = None
+        self._vision = VisionSystem(max_distance=self.vision_range)
         self._alert_pulse = 0
         self.contact_damage = 15
         self._contact_timer = 0
@@ -444,9 +512,7 @@ class Enemy(Entity):
         self._alert_pulse = 0
 
     def detect(self, player):
-        d = math.hypot(player.x - self.x, player.y - self.y)
-        rng = 160
-        return d < (rng * 0.25 if player.is_hidden else rng)
+        return self._vision.can_see_player(self, player)
 
     def try_deal_damage(self, player):
         now = pygame.time.get_ticks()
@@ -484,6 +550,142 @@ class Enemy(Entity):
         if isinstance(self.current_state, ChaseState):
             self.try_deal_damage(player)
         super().update()
+
+
+class SecurityCamera:
+    def __init__(self, x: int, y: int,
+                 vision_range: int = 120,
+                 rotation_angle: int = 0):
+        self.x = x
+        self.y = y
+        self.vision_range: int = vision_range
+        self.rotation_angle: int = rotation_angle
+        self.is_active: bool = True
+        self._vision = VisionSystem(max_distance=vision_range)
+        self._alarm_triggered = False
+
+    def rotate(self):
+        self.rotation_angle = (self.rotation_angle + 2) % 360
+
+    def detect(self, player: Player, game_map) -> bool:
+        if not self.is_active:
+            return False
+
+        class DummyEnemy:
+            def __init__(self, x, y, angle):
+                self.x = x
+                self.y = y
+                self.facing_angle = angle
+
+        dummy = DummyEnemy(self.x, self.y, self.rotation_angle)
+        detected = self._vision.can_see_player(dummy, player)
+        if detected:
+            self.trigger_alarm()
+        return detected
+
+    def trigger_alarm(self):
+        if not self._alarm_triggered:
+            self._alarm_triggered = True
+            print(f"[ALARM] Kamera ({self.x},{self.y}) mendeteksi player!")
+
+    def draw(self, screen: pygame.Surface):
+        pygame.draw.circle(screen, (255, 255, 0), (self.x, self.y), 7)
+        ex = self.x + math.cos(math.radians(self.rotation_angle)) * self.vision_range
+        ey = self.y + math.sin(math.radians(self.rotation_angle)) * self.vision_range
+        pygame.draw.line(screen, (255, 200, 0),
+                         (self.x, self.y), (int(ex), int(ey)), 1)
+
+
+class Terminal:
+    def __init__(self, x: int, y: int, hack_difficulty: int = 1):
+        self.x = x
+        self.y = y
+        self.is_hacked: bool = False
+        self.hack_difficulty: int = hack_difficulty
+        self.rect = pygame.Rect(x, y, 24, 24)
+
+    def hack(self, player: Player) -> bool:
+        if self.is_hacked:
+            return True
+        if player.hack_skill >= self.hack_difficulty:
+            self.is_hacked = True
+            print(f"[TERMINAL] ({self.x},{self.y}) berhasil diretas!")
+            return True
+        print(f"[TERMINAL] Gagal — skill {player.hack_skill} < {self.hack_difficulty}")
+        return False
+
+    def on_interact(self, player: Player):
+        self.hack(player)
+
+    def draw(self, screen: pygame.Surface):
+        color = (0, 200, 100) if self.is_hacked else (200, 50, 50)
+        pygame.draw.rect(screen, color, self.rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.rect, 2)
+        lbl = font(9, True).render("TRM", True, (255, 255, 255))
+        screen.blit(lbl, (self.x + 2, self.y + 7))
+
+
+class Item:
+    def __init__(self, x: int, y: int,
+                 name: str, effect: str, value: str):
+        self.x = x
+        self.y = y
+        self.name: str = name
+        self.effect: str = effect
+        self.value: str = value
+
+    def use(self, player: Player) -> None:
+        if self.effect == "heal":
+            player.health = min(100, player.health + int(self.value))
+            print(f"[ITEM] {self.name} — health: {player.health}")
+        elif self.effect == "hack_boost":
+            player.hack_skill += int(self.value)
+            print(f"[ITEM] {self.name} — hack_skill: {player.hack_skill}")
+        elif self.effect == "stealth":
+            player.is_hidden = True
+            player.noise_level = 0
+            print(f"[ITEM] {self.name} — player tersembunyi")
+
+    def draw(self, screen: pygame.Surface) -> None:
+        rect = pygame.Rect(self.x, self.y, 16, 16)
+        pygame.draw.rect(screen, (255, 220, 50), rect)
+        pygame.draw.rect(screen, (255, 255, 255), rect, 1)
+        lbl = font(8).render(self.name[:3], True, (0, 0, 0))
+        screen.blit(lbl, (self.x + 1, self.y + 4))
+
+    def get_rect(self) -> pygame.Rect:
+        return pygame.Rect(self.x, self.y, 16, 16)
+
+
+class ObjectFactory:
+    def __init__(self, difficulty_level: int = 1):
+        self.enemy_types: List[str] = ["guard", "patrol"]
+        self.item_types: List[str] = ["medkit", "hack_tool", "cloak"]
+        self.difficulty_level: int = difficulty_level
+
+    def create_enemy(self, x=0, y=0, patrol_points=None) -> Enemy:
+        e = Enemy(x, y, speed=1 + self.difficulty_level)
+        e.patrol_points = patrol_points or []
+        e.vision_range = 100 + self.difficulty_level * 20
+        e.health = 50 + self.difficulty_level * 25
+        e._vision = VisionSystem(max_distance=e.vision_range)
+        e.change_state(PatrolState())
+        return e
+
+    def create_item(self, x=0, y=0) -> Item:
+        kind = random.choice(self.item_types)
+        if kind == "medkit":
+            return Item(x, y, "Medkit", "heal", "30")
+        elif kind == "hack_tool":
+            return Item(x, y, "HackTool", "hack_boost", "1")
+        else:
+            return Item(x, y, "Cloak", "stealth", "1")
+
+    def create_terminal(self, x=0, y=0) -> Terminal:
+        return Terminal(x, y, hack_difficulty=self.difficulty_level)
+
+    def create_camera(self, x=0, y=0) -> SecurityCamera:
+        return SecurityCamera(x, y, vision_range=80 + self.difficulty_level * 15)
 
 class Trap:
     def __init__(self, x, y, damage=20):
@@ -569,6 +771,7 @@ class GameMap:
     def __init__(self, w, h):
         self.width = w; self.height = h
         self.tiles: List[List[Tile]] = []
+        self.rooms: List[dict] = []
         self._bg = None
 
     def load_map(self):
@@ -580,6 +783,18 @@ class GameMap:
                 row.append(Tile(x, y, wall))
             self.tiles.append(row)
         self._build_bg()
+
+    def get_tile(self, x: int, y: int) -> Optional[Tile]:
+        if 0 <= x < self.width and 0 <= y < self.height:
+            return self.tiles[y][x]
+        return None
+
+    def get_room_at(self, x: int, y: int) -> Optional[dict]:
+        for room in self.rooms:
+            if (room["x"] <= x < room["x"] + room["w"] and
+                    room["y"] <= y < room["y"] + room["h"]):
+                return room
+        return None
 
     def _build_bg(self):
         sw = self.width * TILE; sh = self.height * TILE
@@ -712,6 +927,7 @@ def draw_hud(screen, player, sw, sh):
     pygame.draw.rect(screen, C_GREEN_DIM, (bx, by, bar_w, bar_h), 1)
     hp_lbl = font(12, True).render(f"HP  {player.health:03d}", True, C_GREEN)
     screen.blit(hp_lbl, (bx + bar_w + 8, by - 1))
+    screen.blit(font(11).render(f"HACK {player.hack_skill}", True, C_CYAN), (bx, by + 16))
     if player.is_hidden:
         pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() / 300)
         col = (int(0), int(200 * pulse), int(90 * pulse))
@@ -762,9 +978,9 @@ class SkinCustomizer:
         sub = font(13).render("← → navigate     ENTER confirm     ESC back", True, (0, 120, 60))
         screen.blit(sub, sub.get_rect(center=(self.sw // 2, 85)))
 
-        card_w, card_h = 88, 130
+        card_w, card_h = 76, 120
         total = len(SKIN_PRESETS)
-        spacing = 110
+        spacing = 90
         start_x = self.sw // 2 - (total // 2) * spacing + spacing // 2
 
         for i, preset in enumerate(SKIN_PRESETS):
@@ -797,10 +1013,10 @@ class SkinCustomizer:
             sw_col = preset["suit"]
             sk_col = preset["skin"]
             dot_y = card_y + 80
-            pygame.draw.rect(screen, sk_col, (cx - 22, dot_y, 14, 14), border_radius=3)
-            pygame.draw.rect(screen, (200, 200, 200), (cx - 22, dot_y, 14, 14), 1, border_radius=3)
-            pygame.draw.rect(screen, sw_col, (cx + 8,  dot_y, 14, 14), border_radius=3)
-            pygame.draw.rect(screen, (200, 200, 200), (cx + 8,  dot_y, 14, 14), 1, border_radius=3)
+            pygame.draw.rect(screen, sk_col, (cx - 20, dot_y, 12, 12), border_radius=3)
+            pygame.draw.rect(screen, (200, 200, 200), (cx - 20, dot_y, 12, 12), 1, border_radius=3)
+            pygame.draw.rect(screen, sw_col, (cx + 8,  dot_y, 12, 12), border_radius=3)
+            pygame.draw.rect(screen, (200, 200, 200), (cx + 8,  dot_y, 12, 12), 1, border_radius=3)
 
             name_col = (0, 255, 120) if is_sel else (0, 140, 60)
             name_lbl = font(11, is_sel).render(preset["name"], True, name_col)
@@ -978,6 +1194,7 @@ class MenuScreen:
             ("WASD / Arrows      Move",      C_WHITE),
             ("H                  Hide / Unhide", C_WHITE),
             ("R (Game Over)      Restart",   C_WHITE),
+            ("Esc                Pause", C_WHITE),
             ("",                             C_GREEN_DIM),
             ("─── ENEMIES ───",             (0, 180, 255)),
             ("",                             C_GREEN_DIM),
@@ -1004,9 +1221,15 @@ class Game:
         self.state = "MENU"
         self.game_map = GameMap(25, 18)
         self.player = Player(64, 64)
+
         self.enemies: List[Enemy] = []
         self.traps: List[Trap] = []
         self.obstacles: List[Obstacle] = []
+        self.cameras: List[SecurityCamera] = []
+        self.terminals: List[Terminal] = []
+        self.items: List[Item] = []
+
+        self._factory = ObjectFactory()
         self.menu = MenuScreen(sw, sh)
         self.sounds = SoundManager()
         self.skin_screen = SkinCustomizer(sw, sh, sounds=self.sounds)  # <-- pass sounds
@@ -1018,6 +1241,13 @@ class Game:
         self._scan = self._make_scanlines()
         self._selected_skin = SKIN_PRESETS[0]
         self._gameover_sound_played = False
+        self._win_sound_played = False
+        self.pause_menu_items = ["RESUME", "MAIN MENU", "QUIT GAME"]
+        self.pause_selected = 0
+        self.win_menu_items = ["RESTART", "MAIN MENU", "QUIT GAME"]
+        self.win_selected = 0
+        self.gameover_menu_items = ["RESTART", "MAIN MENU", "QUIT GAME"]
+        self.gameover_selected = 0
         self.sounds.play_lobby()
 
     def _make_vignette(self):
@@ -1040,7 +1270,8 @@ class Game:
         return s
 
     def _setup_level(self):
-        self.enemies.clear(); self.traps.clear(); self.obstacles.clear()
+        self.enemies.clear(); self.traps.clear(); self.obstacles.clear(); self.cameras.clear()
+        self.terminals.clear(); self.items.clear()
 
         e1 = Enemy(400, 300, 2)
         e1.patrol_points = [(400, 300), (600, 300), (600, 450), (400, 450)]
@@ -1086,6 +1317,15 @@ class Game:
         for (ox, oy, ow, oh, kind) in obs_data:
             self.obstacles.append(Obstacle(ox, oy, ow, oh, kind))
 
+        self.cameras.append(self._factory.create_camera(300, 200))
+        self.cameras.append(self._factory.create_camera(550, 400))
+
+        self.terminals.append(self._factory.create_terminal(300, 100))
+        self.terminals.append(self._factory.create_terminal(650, 400))
+
+        self.items.append(self._factory.create_item(350, 300))
+        self.items.append(self._factory.create_item(600, 200))
+
         self._particles = [_new_particle(self.sw, self.sh) for _ in range(50)]
         for p in self._particles:
             p["max_life"] = p["life"]
@@ -1101,6 +1341,9 @@ class Game:
         self.player = Player(64, 64, self._selected_skin)
         self._setup_level()
         self._gameover_sound_played = False
+        self._win_sound_played = False
+        self.sounds.stop_win()
+        self.sounds.stop_gameover()
         self.state = "PLAYING"
 
     def handle_event(self, event):
@@ -1110,6 +1353,7 @@ class Game:
                 self.state = "SKIN_SELECT"
             elif r == "quit":
                 return False
+
         elif self.state == "SKIN_SELECT":
             r = self.skin_screen.handle_event(event)
             if r == "confirm":
@@ -1117,14 +1361,93 @@ class Game:
                 self.start_loading()
             elif r == "back":
                 self.state = "MENU"
+
+        elif self.state == "PLAYING":
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.state = "PAUSED"
+                self.pause_selected = 0
+
+        elif self.state == "PAUSED":
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_UP, pygame.K_w):
+                    self.pause_selected = (self.pause_selected - 1) % len(self.pause_menu_items)
+                elif event.key in (pygame.K_DOWN, pygame.K_s):
+                    self.pause_selected = (self.pause_selected + 1) % len(self.pause_menu_items)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    action = self.pause_menu_items[self.pause_selected]
+                    if action == "RESUME":
+                        self.state = "PLAYING"
+                    elif action == "MAIN MENU":
+                        self.state = "MENU"
+                        self.sounds.play_lobby()
+                    elif action == "QUIT GAME":
+                        return False
+                elif event.key == pygame.K_ESCAPE:
+                    self.state = "PLAYING"
+
+
+        elif self.state == "WIN":
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    self.win_selected = (self.win_selected - 1) % len(self.win_menu_items)
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    self.win_selected = (self.win_selected + 1) % len(self.win_menu_items)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    action = self.win_menu_items[self.win_selected]
+                    if action == "RESTART":
+                        self.sounds.stop_win()
+                        self.restart()
+                    elif action == "MAIN MENU":
+                        self.sounds.stop_win()
+                        self.state = "MENU"
+                        self.sounds.play_lobby()
+                    elif action == "QUIT GAME":
+                        return False
+
+
         elif self.state == "GAMEOVER":
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                self.restart()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    self.gameover_selected = (self.gameover_selected - 1) % len(self.gameover_menu_items)
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    self.gameover_selected = (self.gameover_selected + 1) % len(self.gameover_menu_items)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    action = self.gameover_menu_items[self.gameover_selected]
+                    if action == "RESTART":
+                        self.sounds.stop_gameover()
+                        self.restart()
+                    elif action == "MAIN MENU":
+                        self.sounds.stop_gameover()
+                        self.state = "MENU"
+                        self.sounds.play_lobby()
+                    elif action == "QUIT GAME":
+                        return False
+
         return True
 
     def _obs_blocks(self, nx, ny):
         r = pygame.Rect(int(nx), int(ny), self.player.width, self.player.height)
-        return any(o.blocks(r) for o in self.obstacles)
+        if any(o.blocks(r) for o in self.obstacles):
+            return True
+
+        MAX_OVERLAP = 20
+
+        for trap in self.traps:
+            if r.colliderect(trap.rect):
+                overlap_x = max(0, min(r.right, trap.rect.right) - max(r.left, trap.rect.left))
+                overlap_y = max(0, min(r.bottom, trap.rect.bottom) - max(r.top, trap.rect.top))
+                overlap = min(overlap_x, overlap_y)
+
+                if overlap > MAX_OVERLAP:
+                    return True
+
+        for corner in [(r.left, r.top), (r.right - 1, r.top),
+                       (r.left, r.bottom - 1), (r.right - 1, r.bottom - 1)]:
+            tx = corner[0] // TILE
+            ty = corner[1] // TILE
+            if not self.game_map.is_walkable(tx, ty):
+                return True
+        return False
 
     def handle_input(self):
         if self.state != "PLAYING": return
@@ -1160,6 +1483,12 @@ class Game:
         if self.state == "SKIN_SELECT":
             return
 
+        if self.state == "PAUSED":
+            return
+
+        if self.state == "WIN":
+            return
+
         if self.state == "LOADING":
             if pygame.time.get_ticks() - self._loading_start >= self._loading_dur:
                 self.player = Player(64, 64, self._selected_skin)
@@ -1188,6 +1517,21 @@ class Game:
             if t.check_and_apply(self.player):
                 self.player.take_damage_flash()
 
+        for cam in self.cameras:
+            cam.rotate()
+            cam.detect(self.player, self.game_map)
+
+        for term in self.terminals:
+            if self.player.rect.colliderect(term.rect):
+                if not term.is_hacked:
+                    term.hack(self.player)
+
+        for item in self.items[:]:
+            if self.player.rect.colliderect(item.get_rect()):
+                item.use(self.player)
+                self.items.remove(item)
+
+
         for p in self._particles:
             p["x"] += p["vx"]
             p["y"] += p["vy"]
@@ -1199,6 +1543,16 @@ class Game:
 
         if self.player.health <= 0:
             self.state = "GAMEOVER"
+            return
+
+        if self.terminals and all(t.is_hacked for t in self.terminals):
+            if self.state != "WIN":
+               self.state = "WIN"
+               self.win_selected = 0
+               if not self._win_sound_played:
+                   self.sounds.play_win()
+                   self._win_sound_played = True
+            print("[WIN] Semua terminal berhasil diretas! Mission Complete!")
 
     def draw(self, screen):
         screen.fill(C_BG)
@@ -1206,7 +1560,81 @@ class Game:
         elif self.state == "SKIN_SELECT": self.skin_screen.draw(screen)
         elif self.state == "LOADING":     self._draw_loading(screen)
         elif self.state == "PLAYING":     self._draw_playing(screen)
+        elif self.state == "PAUSED":
+            self._draw_playing(screen)
+            self._draw_pause_menu(screen)
+        elif self.state == "WIN":
+            self._draw_playing(screen)
+            self._draw_win_menu(screen)
         elif self.state == "GAMEOVER":    self._draw_gameover(screen)
+
+    def _draw_pause_menu(self, screen):
+        ov = pygame.Surface((self.sw, self.sh), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 160))
+        screen.blit(ov, (0, 0))
+
+        title = font(36, True).render("[ PAUSED ]", True, C_AMBER)
+        screen.blit(title, title.get_rect(center=(self.sw // 2, self.sh // 2 - 80)))
+
+        now = pygame.time.get_ticks()
+        for i, item in enumerate(self.pause_menu_items):
+            sel = (i == self.pause_selected)
+            col = C_GREEN if sel else C_GREEN_DIM
+            if sel:
+                pulse = 0.7 + 0.3 * math.sin(now / 200)
+                col = (int(255 * pulse), int(255 * pulse), int(100 * pulse))
+
+            lbl = font(24, True).render(item, True, col)
+            iy = self.sh // 2 - 20 + i * 40
+            screen.blit(lbl, lbl.get_rect(center=(self.sw // 2, iy)))
+
+        hint = font(12).render("UP/DOWN navigate   ENTER select   ESC resume", True, C_GREEN_DIM)
+        screen.blit(hint, hint.get_rect(center=(self.sw // 2, self.sh - 40)))
+
+    def _draw_win_menu(self, screen):
+        ov = pygame.Surface((self.sw, self.sh), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 180))
+        screen.blit(ov, (0, 0))
+
+        now = pygame.time.get_ticks()
+
+        for i in range(20):
+            angle = now / 500 + i * (360 / 20)
+            rx = self.sw // 2 + int(math.cos(math.radians(angle)) * 250)
+            ry = self.sh // 2 + int(math.sin(math.radians(angle)) * 100)
+            a = int(120 + 80 * math.sin(math.radians(angle + now / 3)))
+            if a > 0:
+                ps = pygame.Surface((8, 8), pygame.SRCALPHA)
+                pygame.draw.circle(ps, (255, 215, 0, a), (4, 4), 4)
+                screen.blit(ps, (rx - 4, ry - 4))
+
+        pulse = 0.7 + 0.3 * math.sin(now / 300)
+        glow_col = (int(255 * pulse), int(215 * pulse), 0)
+
+        title = font(44, True).render("[ MISSION COMPLETE ]", True, glow_col)
+        screen.blit(title, title.get_rect(center=(self.sw // 2, self.sh // 2 - 80)))
+
+        subtitle = font(16).render("All terminals hacked — system compromised!", True, C_GOLD)
+        screen.blit(subtitle, subtitle.get_rect(center=(self.sw // 2, self.sh // 2 - 30)))
+
+        num_items = len(self.win_menu_items)
+        spacing = 220  # Jarak antar item
+        start_x = (self.sw - (num_items - 1) * spacing) // 2
+
+        for i, item in enumerate(self.win_menu_items):
+            sel = (i == self.win_selected)
+            col = (int(255 * pulse), int(255 * pulse), int(100 * pulse)) if sel else C_GREEN_DIM
+
+            lbl = font(26, True).render(item, True, col)
+            ix = start_x + i * spacing  # Posisi X yang terpusat dengan sempurna
+            iy = self.sh // 2 + 40
+            screen.blit(lbl, lbl.get_rect(center=(ix, iy)))
+
+            if sel:
+                pygame.draw.rect(screen, col, (ix - 70, iy + 18, 140, 2), border_radius=1)
+
+        hint = font(12).render("← → navigate     ENTER select", True, C_GREEN_DIM)
+        screen.blit(hint, hint.get_rect(center=(self.sw // 2, self.sh - 40)))
 
     def _draw_playing(self, screen):
         self.game_map.draw(screen)
@@ -1224,6 +1652,9 @@ class Game:
 
         for o in self.obstacles: o.draw(screen)
         for t in self.traps:     t.draw(screen)
+        for cam in self.cameras:   cam.draw(screen)
+        for term in self.terminals: term.draw(screen)
+        for item in self.items:     item.draw(screen)
         for e in self.enemies:   e.draw(screen)
         self.player.draw(screen)
 
@@ -1232,11 +1663,16 @@ class Game:
 
         draw_hud(screen, self.player, self.sw, self.sh)
 
+        hacked_count = sum(1 for t in self.terminals if t.is_hacked)
+        total_count = len(self.terminals)
+        term_text = font(12, True).render(f"TERMINALS: {hacked_count}/{total_count}", True, C_CYAN)
+        screen.blit(term_text, (self.sw - term_text.get_width() - 14, 34))
+
         bar_h = 24
         pygame.draw.rect(screen, (3, 8, 3), (0, self.sh - bar_h, self.sw, bar_h))
         pygame.draw.line(screen, C_GREEN_DARK, (0, self.sh - bar_h), (self.sw, self.sh - bar_h))
         hint = font(12).render(
-            "WASD/↑↓←→  move      H  hide/unhide      R  restart on game over",
+            "WASD/↑↓←→  move      H  hide/unhide      ESC  pause",
             True, (0, 100, 45))
         screen.blit(hint, (10, self.sh - bar_h + 5))
 
@@ -1250,25 +1686,31 @@ class Game:
         now = pygame.time.get_ticks()
         pulse = 0.7 + 0.3 * math.sin(now / 400)
         col_r = (int(220 * pulse), int(30 * pulse), int(30 * pulse))
-        col_a = (int(220 * pulse), int(120 * pulse), int(20 * pulse))
 
         t1 = font(40, True).render("[ MISSION FAILED ]", True, col_r)
         t2 = font(14).render("you were compromised", True, (160, 70, 70))
-        t3 = font(16, True).render("press  R  to restart", True, col_a)
 
-        screen.blit(t1, t1.get_rect(center=(self.sw // 2, self.sh // 2 - 40)))
-        screen.blit(t2, t2.get_rect(center=(self.sw // 2, self.sh // 2 + 6)))
-        screen.blit(t3, t3.get_rect(center=(self.sw // 2, self.sh // 2 + 38)))
+        screen.blit(t1, t1.get_rect(center=(self.sw // 2, self.sh // 2 - 80)))
+        screen.blit(t2, t2.get_rect(center=(self.sw // 2, self.sh // 2 - 30)))
 
-        for i in range(12):
-            angle = now / 600 + i * (360 / 12)
-            rx = self.sw // 2 + int(math.cos(math.radians(angle)) * 220)
-            ry = self.sh // 2 + int(math.sin(math.radians(angle)) * 90)
-            a = int(80 + 60 * math.sin(math.radians(angle + now / 4)))
-            if a > 0:
-                ps = pygame.Surface((6, 6), pygame.SRCALPHA)
-                pygame.draw.circle(ps, (220, 30, 30, a), (3, 3), 3)
-                screen.blit(ps, (rx - 3, ry - 3))
+        num_items = len(self.gameover_menu_items)
+        spacing = 220
+        start_x = (self.sw - (num_items - 1) * spacing) // 2
+
+        for i, item in enumerate(self.gameover_menu_items):
+            sel = (i == self.gameover_selected)
+            col = (int(255 * pulse), int(255 * pulse), int(100 * pulse)) if sel else C_GREEN_DIM
+
+            lbl = font(26, True).render(item, True, col)
+            ix = start_x + i * spacing
+            iy = self.sh // 2 + 40
+            screen.blit(lbl, lbl.get_rect(center=(ix, iy)))
+
+            if sel:
+                pygame.draw.rect(screen, col, (ix - 70, iy + 18, 140, 2), border_radius=1)
+
+        hint = font(12).render("← → navigate     ENTER select", True, C_GREEN_DIM)
+        screen.blit(hint, hint.get_rect(center=(self.sw // 2, self.sh - 40)))
 
     def _draw_loading(self, screen):
         now = pygame.time.get_ticks()
