@@ -1127,9 +1127,9 @@ class MenuScreen:
 
         pulse_t = now / 1000
         glow_a = int(80 + 40 * math.sin(pulse_t * 1.5))
-        glow_surf = font(52, True).render("> SHADOW", True, (0, glow_a, int(glow_a * 0.3)))
-        title1    = font(52, True).render("> SHADOW", True, (0, 255, 100))
-        title2    = font(52, True).render("  PROTOCOL", True, (0, 200, 70))
+        glow_surf = font(52, True).render("> STEALTH ROGUELITE", True, (0, glow_a, int(glow_a * 0.3)))
+        title1    = font(52, True).render("> STEALTH ROGUELITE", True, (0, 255, 100))
+        title2    = font(52, True).render("  GAME", True, (0, 200, 70))
         tx1 = self.sw // 2 - title1.get_width() // 2
         tx2 = self.sw // 2 - title2.get_width() // 2
         for ox, oy in [(-3, -3), (3, -3), (-3, 3), (3, 3)]:
@@ -1760,7 +1760,7 @@ class Game:
 
 if __name__ == "__main__":
     screen = pygame.display.set_mode((800, 576))
-    pygame.display.set_caption("Shadow Protocol v5")
+    pygame.display.set_caption("Top-Down Stealth Roguelite Game")
     clock = pygame.time.Clock()
     game = Game(800, 576)
     running = True
