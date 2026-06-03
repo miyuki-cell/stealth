@@ -72,9 +72,11 @@ Pastikan Anda sudah menginstal **Python (versi 3.8 atau yang lebih baru)** di ko
      source venv/bin/activate
 
 4. **Jalankan Game**
+   Eksekusi salah satu perintah di bawah ini sesuai dengan sistem operasi Anda:
    ```bash
-   python stealthgame.py
+   # Untuk Windows / Virtual Environment aktif
+   python stealth.py
 
-   python2 stealthgame.py
-
+   # Untuk macOS / Linux (tanpa venv)
+   python3 stealth.py
    
