@@ -1618,7 +1618,7 @@ class Game:
         screen.blit(subtitle, subtitle.get_rect(center=(self.sw // 2, self.sh // 2 - 30)))
 
         num_items = len(self.win_menu_items)
-        spacing = 220  # Jarak antar item
+        spacing = 220
         start_x = (self.sw - (num_items - 1) * spacing) // 2
 
         for i, item in enumerate(self.win_menu_items):
@@ -1626,7 +1626,7 @@ class Game:
             col = (int(255 * pulse), int(255 * pulse), int(100 * pulse)) if sel else C_GREEN_DIM
 
             lbl = font(26, True).render(item, True, col)
-            ix = start_x + i * spacing  # Posisi X yang terpusat dengan sempurna
+            ix = start_x + i * spacing
             iy = self.sh // 2 + 40
             screen.blit(lbl, lbl.get_rect(center=(ix, iy)))
 
